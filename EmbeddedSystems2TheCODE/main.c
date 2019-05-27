@@ -64,6 +64,7 @@ void leftMotor(int speed);
 void drive(int speed);
 void stop();
 
+volatile char commCheck[3] = "No ";
 
 //Array of unsigned integers used to store up to 6 different sensor values located on different analog channels.
 volatile uint16_t sensorValues[6];
@@ -102,9 +103,10 @@ ISR(ADC_vect){
 			run = '1';
 			break;
 			case 'B':
-			leftMotor(0);
+			/*leftMotor(0);
 			rightMotor(0);
-			_delay_ms(5000);
+			_delay_ms(5000);*/
+			strcpy(commCheck,"Yes");
 			break;
 			case 'C':
 			leftMotor(0);
@@ -147,6 +149,7 @@ ISR(ADC_vect){
 		initializeMotors();
 		initializeADC();
 		initializeUltrasonic();
+		sei();
 		DDRB =	0xFF;
 		
 		char distance[100];
@@ -196,11 +199,18 @@ ISR(ADC_vect){
 			sendUltraSonicSignal();
 			dtostrf(raw, 3, 1, distance);
 			
+			
 			lcd_gotoxy(0,0);
 			lcd_puts("Distance: ");
 			lcd_puts(distance);
 			lcd_puts("   ");
-			lcd_display();
+			//lcd_display();
+			
+			lcd_gotoxy(12,3);
+			lcd_puts("Comm: ");
+			lcd_puts(commCheck);
+			lcd_puts("   ");
+			//lcd_display();
 					
 			
 		    lcd_gotoxy(0,5);
