@@ -4,6 +4,12 @@
 #include <avr/delay.h>
 #include <avr/interrupt.h>
 #include <stdlib.h>
+#include "lcd.h"
+#include "i2c.h"
+#include "font.h"
+#include <stdio.h>
+#include <avr/common.h>
+#include <stdbool.h>
 #include "uart.h"
 
 
@@ -25,14 +31,23 @@
 #define OPTICAL_RIGHT 5
 #define OPTICAL_FRONT 1
 
+//Offset of Accel Data
+#define MPU_AXOFFSET 0.02
+#define MPU_AYOFFSET 0.05
+#define MPU_AZOFFSET -0.2
+
+#define HIT_THRESHHOLD 0.18
+
 //Function prototypes for assisting subroutines.
 void initializeMotors();
+void initializeUltrasonic();
 void initializePWM();
 void initializePWM();
 void initializeADC();
 void startConversion();
 void selectChannel(uint8_t analogPin);
 uint16_t readSensor(uint8_t analogPin);
+void sendUltraSonicSignal();
 
 void analogWrite(uint8_t pin, uint8_t dutyCycle);
 
@@ -102,6 +117,26 @@ ISR(ADC_vect){
 		
 		
 	}
+	
+	double raw;
+	uint16_t numuS;
+	uint8_t hit = 0;
+	
+	
+	ISR(PCINT1_vect) {
+		if (bit_is_set(PINC,PORTC3)) {					// Checks if echo is high
+			TCNT1 = 0;								// Reset Timer
+			} else {
+			numuS = TCNT1;					// Save Timer value
+			uint8_t oldSREG = SREG;
+			cli();									// Disable Global interrupts
+			raw = numuS * 0.00107388316;
+
+			SREG = oldSREG;							// Enable interrupts
+			// Toggle debugging LED
+		}
+		
+	}
 
 
 	/* ****************************** Start of main *****************************/
@@ -111,82 +146,77 @@ ISR(ADC_vect){
 		initUART0();
 		initializeMotors();
 		initializeADC();
-		DDRB =	0b11111111;
+		initializeUltrasonic();
+		DDRB =	0xFF;
 		
+		char distance[100];
+		char axg_arr[10];
+		char ayg_arr[10];
+		char azg_arr[10];
 		
-		float target=60;
-		float ISpeed =255;
-		float comp;
-		float leftSpeed;
-		float rightSpeed;
-		int counter = 0;
-		float cycleCounter = 0;
-		int onTheBlack = 0;
-		int onTheWhite = 0;
-		int sensor;
-		int disSensor;
-		int disSensorSum;
-
-		float error=0;
-		float integral=0;
-		float derogative=0;
-		float lastError=0;
+		lcd_init(0xAF);    // init lcd and turn on
+		//init mpu6050
+		mpu6050_init();
+		_delay_ms(50);
+		
+			#if MPU6050_GETATTITUDE == 0
+			int16_t ax = 0;
+			int16_t ay = 0;
+			int16_t az = 0;
+			int16_t gx = 0;
+			int16_t gy = 0;
+			int16_t gz = 0;
+			double axg = 0;
+			double ayg = 0;
+			double azg = 0;
+			double gxds = 0;
+			double gyds = 0;
+			double gzds = 0;
+			#endif
 
 		while(1){
-			
-			sensor = readSensor(IR_LEFT);
-			disSensor = readSensor(OPTICAL_FRONT);
-			comp = (sensor/target);
-			disSensorSum = readSensor(OPTICAL_FRONT) + readSensor(OPTICAL_FRONT) + readSensor(OPTICAL_FRONT) + readSensor(OPTICAL_FRONT) + readSensor(OPTICAL_FRONT) + readSensor(OPTICAL_FRONT) + readSensor(OPTICAL_FRONT);
-
-			error = target - sensor;
-			integral = integral + sensor;
-			derogative = error - lastError;
-			lastError=error;
+			_delay_ms(60);
 			
 			
-			//Check if bot is over the black line and if yeas increase the counter
-			if ((onTheBlack == 0) && (sensor > 800)){
-				onTheBlack = 1;   onTheWhite= 0; counter++;
+			#if MPU6050_GETATTITUDE == 0
+			mpu6050_getConvAccelData(&axg, &ayg, &azg);
+			axg = axg + MPU_AXOFFSET;
+			ayg = ayg + MPU_AYOFFSET;
+			azg = azg + MPU_AZOFFSET;
+			
+			#endif
+			
+			#if MPU6050_GETATTITUDE == 0
+			
+			if((axg > HIT_THRESHHOLD || axg < -HIT_THRESHHOLD) || (ayg > HIT_THRESHHOLD || ayg < -HIT_THRESHHOLD)){
+				hit = 1;
 			}
+			#endif
 			
-			//Check if bot is over the white line and if yeas increase the counter
-			if ((onTheWhite == 0) && (sensor < 55)) {
-				onTheBlack = 0; onTheWhite = 1; counter++;
+			sendUltraSonicSignal();
+			dtostrf(raw, 3, 1, distance);
+			
+			lcd_gotoxy(0,0);
+			lcd_puts("Distance: ");
+			lcd_puts(distance);
+			lcd_puts("   ");
+			lcd_display();
+					
+			
+		    lcd_gotoxy(0,5);
+			lcd_puts("Status: ");
+			lcd_puts(hit);
+			lcd_puts("   ");
+			lcd_display();
+			
+			
+			
+			
+			if(raw > 10 && !hit){
+				drive(126);
+			} else {
+				drive(0);
 			}
-			
-			if (counter == 4 ) {
-				leftMotor(0); rightMotor(0); _delay_ms(2000); target = target + 0; counter = 0;
-			}
-			
-			
-			leftSpeed = ((ISpeed*comp)*0.8) + ((integral*0,2) - (derogative*0,2));
-			rightSpeed = ((ISpeed/comp)*0.8) - ((integral*0,2) + (derogative*0,2));
-			if (leftSpeed > 255) {leftSpeed = 255;}
-			if (leftSpeed < 50) {leftSpeed = 0;}
-			if (rightSpeed > 255) {rightSpeed = 255;}
-			if (rightSpeed < 50) {rightSpeed = 0;}
-			
-			if (run == '1'){
-				
-				leftMotor(leftSpeed);
-				rightMotor(rightSpeed);
-				
-			}
-			
-			
-			
-			if(sensor > 60 && sensor < 800){
-				cycleCounter++;
-			}
-			
-			
-			if(cycleCounter > 60000){
-				cycleCounter == 0;
-				onTheBlack == 0;
-				onTheWhite == 0;
-			}
-			
 			
 		}
 		
@@ -227,6 +257,23 @@ ISR(ADC_vect){
 		DDRD |= (1 << L_CTRL_1) | (1 << L_CTRL_2) | (1 << R_CTRL_1);
 		DDRB |= (1 << R_CTRL_2);
 		
+	}
+	
+	//Initialization of pin mask interrupt for the echo to get accurate readings
+	void initializeUltrasonic(){
+		
+		DDRC = 0xFF;							// Port C all output. PC0: RW		PC1: RS		PC2: E
+		DDRC &= ~(1<<DDC3);						// Set Pin C5 as input to read Echo
+		PORTC |= (1<<PORTC3);					// Enable pull up on C5
+		PORTC &= ~(1<<PORTC2);						// Init C4 as low (trigger)
+
+		PRR &= ~(1<<PRTIM1);					// To activate timer1 module
+		TCNT1 = 0;								// Initial timer value
+		TCCR1B |= (1<<CS10);					// Timer without prescaller. Since default clock for atmega328p is 1Mhz period is 1uS
+		TCCR1B |= (1<<ICES1);					// First capture on rising edge
+
+		PCICR = (1<<PCIE1);						// Enable PCINT[14:8] we use pin C5 which is PCINT13
+		PCMSK1 = (1<<PCINT11);					// Enable C5 interrupt
 	}
 
 	//Rotate the leftMotor CW
@@ -306,6 +353,12 @@ ISR(ADC_vect){
 			leftFwd((uint8_t) abs(speed));
 		}
 	}
+	
+	void sendUltraSonicSignal(){
+		PORTC |= (1<<PORTC2);						// Set trigger high
+		_delay_us(10);							// for 10uS
+		PORTC &= ~(1<<PORTC2);						// to trigger the ultrasonic module
+	}
 
 	
 	//analogWrite works in conjunction with initializePWM where we enable timer0, OCR0B and OCR0A. YOU MUST INITIALIZE PWM BEFORE ANALOGWRITE WOULD WORK.
@@ -358,4 +411,5 @@ ISR(ADC_vect){
 			} else{
 			return 0;
 		}
+	
 	}
