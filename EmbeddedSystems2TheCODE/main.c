@@ -147,7 +147,7 @@ ISR(PCINT1_vect) {
 int main(void){
 	initUART0();
 	initializeMotors();
-	initializeADC();
+	//initializeADC();
 	initializeUltrasonic();
 	sei();
 	DDRB =	0xFF;
