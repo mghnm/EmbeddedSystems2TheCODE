@@ -31,6 +31,7 @@
 #define OPTICAL_RIGHT 5
 #define OPTICAL_FRONT 1
 
+
 //Offset of Accel Data
 #define MPU_AXOFFSET 0.02
 #define MPU_AYOFFSET 0.05
@@ -70,11 +71,15 @@ void leftMotor(int speed);
 void drive(int speed);
 void stop();
 
+
+
 volatile char run = '1';
 volatile char commCheck[3] = "No ";
+volatile char commandChar;
 double raw;
 uint16_t numuS;
 uint8_t hit = 0;
+
 
 //Array of unsigned integers used to store up to 6 different sensor values located on different analog channels.
 volatile uint16_t sensorValues[6];
@@ -95,37 +100,8 @@ ISR(ADC_vect){
 	startConversion();
 }
 
-ISR(USART_RX_vect) {
-	run = '1';
-	switch(UDR0) {
-		case 'H':
-			run = '0';
-			break;
-		case 'L':
-			turnLeft(FULL_SPEED);
-			break;
-		case 'l':
-			turnLeft(HALF_SPEED);
-			break;
-		case 'R':
-			turnRight(FULL_SPEED);
-			break;
-		case 'r':
-			turnRight(HALF_SPEED);
-			break;
-		case 'F':
-			drive(FULL_SPEED);
-			break;
-		case 'f':
-			drive(HALF_SPEED);
-			break;
-		case 'B':
-			drive(-FULL_SPEED);
-			break;
-		case 'b':
-			drive(-HALF_SPEED);
-			break;
-	}
+ISR(USART_RX_vect) {// Connection receiver interrupt
+	commandChar = UDR0;
 }
 
 ISR(PCINT1_vect) {
@@ -144,7 +120,7 @@ ISR(PCINT1_vect) {
 }
 
 /* ****************************** Start of main *****************************/
-int main(void){
+int main(void) {
 	initUART0();
 	initializeMotors();
 	//initializeADC();
@@ -177,6 +153,7 @@ int main(void){
 	double gzds = 0;
 	#endif
 
+	
 	while(1) {
 		_delay_ms(60);
 		
@@ -191,6 +168,49 @@ int main(void){
 		}
 		#endif
 		
+		run = '1';
+		switch(commandChar) {
+			case 'H':
+				run = '0';
+				break;
+			case 'L':
+				turnLeft(FULL_SPEED);
+				break;
+			case 'l':
+				turnLeft(HALF_SPEED);
+				break;
+			case 'R':
+				turnRight(FULL_SPEED);
+				break;
+			case 'r':
+				turnRight(HALF_SPEED);
+				break;
+			case 'F':
+				drive(FULL_SPEED);
+				break;
+			case 'f':
+				drive(HALF_SPEED);
+				break;
+			case 'B':
+				drive(-FULL_SPEED);
+				break;
+			case 'b':
+				drive(-HALF_SPEED);
+				break;
+		}
+		
+		lcd_gotoxy(0,0);
+		lcd_puts("Run: ");
+		lcd_putc(run);
+		lcd_puts("   ");
+		
+		lcd_gotoxy(0,2);
+		lcd_puts("Command: ");
+		lcd_putc(commandChar);
+		lcd_puts("   ");
+		lcd_display();
+	
+		/*
 		sendUltraSonicSignal();
 		dtostrf(raw, 3, 1, distance);
 		
@@ -211,12 +231,14 @@ int main(void){
 		lcd_puts(hit);
 		lcd_puts("   ");
 		lcd_display();
-			
+	
 		if(raw > 10 && !hit) {
 			drive(126);
 		} else {
 			drive(0);
 		}
+	
+	*/
 	}
 	return 0;
 }
