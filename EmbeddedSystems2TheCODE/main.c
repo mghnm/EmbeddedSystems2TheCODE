@@ -72,31 +72,11 @@ void drive(int speed);
 void stop();
 
 volatile char run = '1';
-volatile char commCheck[3] = "No ";
-volatile char commandChar;
+volatile char commandChar = 'S';
 double raw;
 uint16_t numuS;
 uint8_t hit = 0;
-
-
-//Array of unsigned integers used to store up to 6 different sensor values located on different analog channels.
-volatile uint16_t sensorValues[6];
-
-//Initial channel set to Infra red sensor right.
-volatile uint8_t currentAnalogChannel = OPTICAL_FRONT;
-
-//Interrupt service routine to update the sensor value array continuously using interrupts
-ISR(ADC_vect){
-	//There is a simple logic change that would allow up to 6 sensors 0-5 analog pins
-	if(currentAnalogChannel > OPTICAL_RIGHT){
-		currentAnalogChannel = OPTICAL_FRONT;
-	}
-	
-	selectChannel(currentAnalogChannel);
-	sensorValues[currentAnalogChannel] = ADCW;
-	currentAnalogChannel++;
-	startConversion();
-}
+uint8_t obstacle = 0;
 
 ISR(USART_RX_vect) {// Connection receiver interrupt
 	commandChar = UDR0;
@@ -108,7 +88,15 @@ ISR(PCINT1_vect) {
 		} else {
 		numuS = TCNT1;					// Save Timer value
 		uint8_t oldSREG = SREG;
-		cli();									// Disable Global interrupts
+		cli();	
+		//Bounding the distance between 2cm and 30 cm	
+		if(numuS < 1863){
+			numuS = 1863;
+		} else if(numuS > 27936){
+			numuS = 27936;
+		}	else {}
+		
+								// Disable Global interrupts
 		raw = numuS * 0.00107388316;
 
 		SREG = oldSREG;							// Enable interrupts
@@ -121,7 +109,6 @@ ISR(PCINT1_vect) {
 int main(void) {
 	initUART0();
 	initializeMotors();
-	//initializeADC();
 	initializeUltrasonic();
 	sei();
 	DDRB =	0xFF;
@@ -150,8 +137,6 @@ int main(void) {
 	double gyds = 0;
 	double gzds = 0;
 	#endif
-
-	run = 1;
 	
 	while(1) {
 		_delay_ms(60);
@@ -169,83 +154,61 @@ int main(void) {
 		
 		sendUltraSonicSignal();
 		dtostrf(raw, 3, 1, distance);
+		if(raw < 6){
+			obstacle = 1;
+		} else {
+			obstacle = 0;
+		}
 		
-		if(raw < 10) {
-			uart0_putc('O');
-			run = 0;
-			stop();
-		}
-		else if (hit)
-		{
+		
+		if(obstacle){
+			if(commandChar == 'b' || commandChar == 'B'){
+				//Let the car back up
+				drive(-HALF_SPEED);
+				
+			} else {
+				uart0_putc('O');
+				stop();
+			}
+		} else if(hit){
 			uart0_putc('H');
-			run = 0;
 			stop();
-			while(1);
-		}
-		else
-		{
-			run = '1';
+			_delay_ms(1000);
+			hit=0;	
+		} else{
 			uart0_putc('D');
 			switch(commandChar) {
 				case 'S':
-					run = '0';
-					stop();
-					break;
+				stop();
+				break;
 				case 'L':
-					turnLeft(FULL_SPEED);
-					break;
+				turnLeft(FULL_SPEED);
+				break;
 				case 'l':
-					turnLeft(HALF_SPEED);
-					break;
+				turnLeft(HALF_SPEED);
+				break;
 				case 'R':
-					turnRight(FULL_SPEED);
-					break;
+				turnRight(FULL_SPEED);
+				break;
 				case 'r':
-					turnRight(HALF_SPEED);
-					break;
+				turnRight(HALF_SPEED);
+				break;
 				case 'F':
-					drive(FULL_SPEED);
-					break;
+				drive(FULL_SPEED);
+				break;
 				case 'f':
-					drive(HALF_SPEED);
-					break;
+				drive(HALF_SPEED);
+				break;
 				case 'B':
-					drive(-FULL_SPEED);
-					break;
+				drive(-FULL_SPEED);
+				break;
 				case 'b':
-					drive(-HALF_SPEED);
-					break;
+				drive(-HALF_SPEED);
+				break;
 			}
+			
 		}
 		
-/*		lcd_gotoxy(0,0);
-		lcd_puts("Run: ");
-		lcd_putc(run);
-		lcd_puts("   ");
-		
-		lcd_gotoxy(0,2);
-		lcd_puts("Command: ");
-		lcd_putc(commandChar);
-		lcd_puts("   ");
-		lcd_display();*/
-	
-/*		lcd_gotoxy(0,0);
-		lcd_puts("Distance: ");
-		lcd_puts(distance);
-		lcd_puts("   ");
-		//lcd_display();
-		
-		lcd_gotoxy(12,3);
-		lcd_puts("Comm: ");
-		lcd_puts(commCheck);
-		lcd_puts("   ");
-		//lcd_display();
-		
-		lcd_gotoxy(0,5);
-		lcd_puts("Status: ");
-		lcd_puts(hit);
-		lcd_puts("   ");
-		lcd_display();*/
 	}
 	return 0;
 }
@@ -411,40 +374,5 @@ void analogWrite(uint8_t pin, uint8_t dutyCycle) {
 	}
 }
 
-	//Initializes the ADC registers to support the IR and optical sensors.
-	void initializeADC(){
-		//Configure the ADMUX for AVCC as input (internal 5v reference) / not left adjusted results (10-bit resolution) / ADC0 as input / 0b0100:0000
-		ADMUX = 0x40;
-		//Configure ADCSRA for enable ADC / don't start conversion / prescaler 128 / disable auto-trigger / enable ADC interrupt 0b10001:111
-		ADCSRA = 0x8F;
-		
-		selectChannel(OPTICAL_FRONT);
-		sei();
-		startConversion();
-	}
 
-	//Takes an analog pin input as previously defined e.g. IR_LEFT IR_RIGHT to initialize the ADMUX with the proper channel
-	void selectChannel(uint8_t analogPin){
-		ADMUX = (ADMUX & 0xE0) | (analogPin & 0x1F);   //select channel (MUX0-4 bits)
-	}
 
-	//Read sensor takes in the latest value stored in the sensors array at the specified index and returns it. This value is updated via the ADC_vect interrupt.
-	uint16_t readSensor(uint8_t analogPin){
-		return sensorValues[analogPin + 1];
-	}
-
-	//For convenience startConversion is used instead of the bit maths.
-	void startConversion(){
-		ADCSRA |= (1 << ADSC);
-	}
-
-	//Returns 1 if there is an obstacle detected on that sensor (call only on OPTICAL sensors aka OPTICAL_FRONT OPTICAL_LEFT OPTICAL_RIGHT).
-	uint8_t checkObstacle(uint8_t analogPin){
-		uint16_t analogSignal = readSensor(analogPin);
-		if(analogSignal > 360){
-			return 1;
-			} else{
-			return 0;
-		}
-	
-	}
