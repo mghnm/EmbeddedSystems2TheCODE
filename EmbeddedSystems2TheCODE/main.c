@@ -31,17 +31,17 @@
 #define OPTICAL_RIGHT 5
 #define OPTICAL_FRONT 1
 
-
 //Offset of Accel Data
 #define MPU_AXOFFSET 0.02
 #define MPU_AYOFFSET 0.05
 #define MPU_AZOFFSET -0.2
 
 //Motorspeeds
-#define FULL_SPEED 127
-#define HALF_SPEED 63
+#define FULL_SPEED 255
+#define HALF_SPEED 127
 
-#define HIT_THRESHHOLD 0.18
+#define HIT_THRESHHOLD_LR 0.2
+#define HIT_THRESHHOLD_FB 0.6
 
 //Function prototypes for assisting subroutines.
 void initializeMotors();
@@ -70,8 +70,6 @@ void rightMotor(int speed);
 void leftMotor(int speed);
 void drive(int speed);
 void stop();
-
-
 
 volatile char run = '1';
 volatile char commCheck[3] = "No ";
@@ -153,53 +151,74 @@ int main(void) {
 	double gzds = 0;
 	#endif
 
+	run = 1;
 	
 	while(1) {
 		_delay_ms(60);
-		
+
 		#if MPU6050_GETATTITUDE == 0
 		mpu6050_getConvAccelData(&axg, &ayg, &azg);
 		axg = axg + MPU_AXOFFSET;
 		ayg = ayg + MPU_AYOFFSET;
 		azg = azg + MPU_AZOFFSET;
 		
-		if((axg > HIT_THRESHHOLD || axg < -HIT_THRESHHOLD) || (ayg > HIT_THRESHHOLD || ayg < -HIT_THRESHHOLD)){
+		if((axg > HIT_THRESHHOLD_LR || axg < -HIT_THRESHHOLD_LR) || (ayg > HIT_THRESHHOLD_FB || ayg < -HIT_THRESHHOLD_FB)){
 			hit = 1;
 		}
 		#endif
 		
-		run = '1';
-		switch(commandChar) {
-			case 'H':
-				run = '0';
-				break;
-			case 'L':
-				turnLeft(FULL_SPEED);
-				break;
-			case 'l':
-				turnLeft(HALF_SPEED);
-				break;
-			case 'R':
-				turnRight(FULL_SPEED);
-				break;
-			case 'r':
-				turnRight(HALF_SPEED);
-				break;
-			case 'F':
-				drive(FULL_SPEED);
-				break;
-			case 'f':
-				drive(HALF_SPEED);
-				break;
-			case 'B':
-				drive(-FULL_SPEED);
-				break;
-			case 'b':
-				drive(-HALF_SPEED);
-				break;
+		sendUltraSonicSignal();
+		dtostrf(raw, 3, 1, distance);
+		
+		if(raw < 10) {
+			uart0_putc('O');
+			run = 0;
+			stop();
+		}
+		else if (hit)
+		{
+			uart0_putc('H');
+			run = 0;
+			stop();
+			while(1);
+		}
+		else
+		{
+			run = '1';
+			uart0_putc('D');
+			switch(commandChar) {
+				case 'S':
+					run = '0';
+					stop();
+					break;
+				case 'L':
+					turnLeft(FULL_SPEED);
+					break;
+				case 'l':
+					turnLeft(HALF_SPEED);
+					break;
+				case 'R':
+					turnRight(FULL_SPEED);
+					break;
+				case 'r':
+					turnRight(HALF_SPEED);
+					break;
+				case 'F':
+					drive(FULL_SPEED);
+					break;
+				case 'f':
+					drive(HALF_SPEED);
+					break;
+				case 'B':
+					drive(-FULL_SPEED);
+					break;
+				case 'b':
+					drive(-HALF_SPEED);
+					break;
+			}
 		}
 		
-		lcd_gotoxy(0,0);
+/*		lcd_gotoxy(0,0);
 		lcd_puts("Run: ");
 		lcd_putc(run);
 		lcd_puts("   ");
@@ -208,13 +227,9 @@ int main(void) {
 		lcd_puts("Command: ");
 		lcd_putc(commandChar);
 		lcd_puts("   ");
-		lcd_display();
+		lcd_display();*/
 	
-		/*
-		sendUltraSonicSignal();
-		dtostrf(raw, 3, 1, distance);
-		
-		lcd_gotoxy(0,0);
+/*		lcd_gotoxy(0,0);
 		lcd_puts("Distance: ");
 		lcd_puts(distance);
 		lcd_puts("   ");
@@ -230,15 +245,7 @@ int main(void) {
 		lcd_puts("Status: ");
 		lcd_puts(hit);
 		lcd_puts("   ");
-		lcd_display();
-	
-		if(raw > 10 && !hit) {
-			drive(126);
-		} else {
-			drive(0);
-		}
-	
-	*/
+		lcd_display();*/
 	}
 	return 0;
 }
@@ -277,7 +284,7 @@ void initializeMotors(){
 }
 	
 //Initialization of pin mask interrupt for the echo to get accurate readings
-void initializeUltrasonic(){
+void initializeUltrasonic() {
 		
 	DDRC = 0xFF;							// Port C all output. PC0: RW		PC1: RS		PC2: E
 	DDRC &= ~(1<<DDC3);						// Set Pin C5 as input to read Echo
@@ -354,11 +361,13 @@ void drive(int speed) {
 }
 
 void turnRight(int speed) {
+	speed = -speed;
 	rightMotor(speed/2);
 	leftMotor(speed);
 }
 
 void turnLeft(int speed) {
+	speed = -speed;
 	rightMotor(speed);
 	leftMotor(speed/2);
 }
