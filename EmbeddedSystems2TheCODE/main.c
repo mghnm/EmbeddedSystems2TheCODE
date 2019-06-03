@@ -72,6 +72,7 @@ void drive(int speed);
 void stop();
 
 volatile char run = '1';
+volatile char driving = '0';
 volatile char commandChar = 'S';
 double raw;
 uint16_t numuS;
@@ -82,6 +83,7 @@ ISR(USART_RX_vect) {// Connection receiver interrupt
 	commandChar = UDR0;
 }
 
+
 ISR(PCINT1_vect) {
 	if (bit_is_set(PINC,PORTC3)) {					// Checks if echo is high
 		TCNT1 = 0;								// Reset Timer
@@ -90,14 +92,16 @@ ISR(PCINT1_vect) {
 		uint8_t oldSREG = SREG;
 		cli();	
 		//Bounding the distance between 2cm and 30 cm	
+		/*
 		if(numuS < 1863){
 			numuS = 1863;
 		} else if(numuS > 27936){
 			numuS = 27936;
 		}	else {}
 		
+		*/
 								// Disable Global interrupts
-		raw = numuS * 0.00107388316;
+		raw = numuS * 0.0085910652; // timervalue / (58.2 * 2MHZ)
 
 		SREG = oldSREG;							// Enable interrupts
 		// Toggle debugging LED
@@ -137,7 +141,7 @@ int main(void) {
 	double gyds = 0;
 	double gzds = 0;
 	#endif
-	
+	driving= 0;
 	while(1) {
 		_delay_ms(60);
 
@@ -154,7 +158,22 @@ int main(void) {
 		
 		sendUltraSonicSignal();
 		dtostrf(raw, 3, 1, distance);
-		if(raw < 6){
+		
+		/*
+		uart0_puts(distance);
+		uart0_puts("\n");
+		if(!driving){
+			drive(-HALF_SPEED);
+			uart0_puts("Driving");
+			uart0_puts("\n");
+			driving = 1;
+		}
+		*/
+		
+		//uart0_puts(distance);
+		//uart0_puts("\n");
+		
+		if(raw < 15){
 			obstacle = 1;
 		} else {
 			obstacle = 0;
@@ -162,21 +181,29 @@ int main(void) {
 		
 		
 		if(obstacle){
-			if(commandChar == 'b' || commandChar == 'B'){
-				//Let the car back up
-				drive(-HALF_SPEED);
-				
-			} else {
-				uart0_putc('O');
-				stop();
-			}
-		} else if(hit){
+			run = 0;
+			//Let the car back up
+			drive(-HALF_SPEED);
+			uart0_putc('O');
+			//uart0_puts(distance);
+			//uart0_puts("\n\r");
+			//stop();
+			
+		} else{
+			run = 1;
+		}
+		
+		if(hit){
 			uart0_putc('H');
 			stop();
 			_delay_ms(1000);
-			hit=0;	
-		} else{
+			hit=0;
+		
+		}else{}
+			
+		if(run){
 			uart0_putc('D');
+			//uart0_puts("\n\r");
 			switch(commandChar) {
 				case 'S':
 				stop();
@@ -205,9 +232,14 @@ int main(void) {
 				case 'b':
 				drive(-HALF_SPEED);
 				break;
+				default:
+				stop();
+				break;
 			}
 			
 		}
+		
+		//commandChar = 'N';
 		
 	}
 	return 0;
@@ -256,7 +288,7 @@ void initializeUltrasonic() {
 
 	PRR &= ~(1<<PRTIM1);					// To activate timer1 module
 	TCNT1 = 0;								// Initial timer value
-	TCCR1B |= (1<<CS10);					// Timer without prescaller. Since default clock for atmega328p is 1Mhz period is 1uS
+	TCCR1B |= (1<<CS11);					// Timer with prescaller 8. Since default clock for atmega328p is 1Mhz period is 1uS
 	TCCR1B |= (1<<ICES1);					// First capture on rising edge
 
 	PCICR = (1<<PCIE1);						// Enable PCINT[14:8] we use pin C5 which is PCINT13
@@ -354,6 +386,9 @@ void leftMotor(int speed) {
 }
 	
 void sendUltraSonicSignal(){
+	
+    PORTC &= ~(1<<PORTC2);	
+	_delay_us(2);
 	PORTC |= (1<<PORTC2);						// Set trigger high
 	_delay_us(10);							// for 10uS
 	PORTC &= ~(1<<PORTC2);						// to trigger the ultrasonic module
